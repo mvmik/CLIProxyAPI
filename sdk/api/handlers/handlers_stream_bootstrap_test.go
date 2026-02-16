@@ -158,7 +158,7 @@ func TestExecuteStreamWithAuthManager_RetriesBeforeFirstByte(t *testing.T) {
 		Streaming: sdkconfig.StreamingConfig{
 			BootstrapRetries: 1,
 		},
-	}, manager)
+	}, nil, manager)
 	dataChan, errChan := handler.ExecuteStreamWithAuthManager(context.Background(), "openai", "test-model", []byte(`{"model":"test-model"}`), "")
 	if dataChan == nil || errChan == nil {
 		t.Fatalf("expected non-nil channels")
@@ -219,7 +219,7 @@ func TestExecuteStreamWithAuthManager_DoesNotRetryAfterFirstByte(t *testing.T) {
 		Streaming: sdkconfig.StreamingConfig{
 			BootstrapRetries: 1,
 		},
-	}, manager)
+	}, nil, manager)
 	dataChan, errChan := handler.ExecuteStreamWithAuthManager(context.Background(), "openai", "test-model", []byte(`{"model":"test-model"}`), "")
 	if dataChan == nil || errChan == nil {
 		t.Fatalf("expected non-nil channels")

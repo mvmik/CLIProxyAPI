@@ -38,7 +38,7 @@ func TestGetRequestDetails_PreservesSuffix(t *testing.T) {
 		})
 	}
 
-	handler := NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, coreauth.NewManager(nil, nil, nil))
+	handler := NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, nil, coreauth.NewManager(nil, nil, nil))
 
 	tests := []struct {
 		name          string

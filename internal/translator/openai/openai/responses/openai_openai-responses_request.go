@@ -28,6 +28,31 @@ import (
 // Returns:
 //   - []byte: The transformed request data in OpenAI chat completions format
 func ConvertOpenAIResponsesRequestToOpenAIChatCompletions(modelName string, inputRawJSON []byte, stream bool) []byte {
+	return ConvertOpenAIResponsesRequestToOpenAIChatCompletionsWithDefault(modelName, inputRawJSON, stream, "")
+}
+
+// ConvertOpenAIResponsesRequestToOpenAIChatCompletionsWithDefault converts OpenAI responses format to OpenAI chat completions format
+// with support for a default reasoning effort value.
+// It transforms the OpenAI responses API format (with instructions and input array) into the standard
+// OpenAI chat completions format (with messages array and system content).
+//
+// The conversion handles:
+// 1. Model name and streaming configuration
+// 2. Instructions to system message conversion
+// 3. Input array to messages array transformation
+// 4. Tool definitions and tool choice conversion
+// 5. Function calls and function results handling
+// 6. Generation parameters mapping (max_tokens, reasoning, etc.)
+//
+// Parameters:
+//   - modelName: The name of the model to use for the request
+//   - inputRawJSON: The raw JSON request data in OpenAI responses format
+//   - stream: A boolean indicating if the request is for a streaming response
+//   - defaultReasoningEffort: The default reasoning effort to use if not present in the request (may be empty)
+//
+// Returns:
+//   - []byte: The transformed request data in OpenAI chat completions format
+func ConvertOpenAIResponsesRequestToOpenAIChatCompletionsWithDefault(modelName string, inputRawJSON []byte, stream bool, defaultReasoningEffort string) []byte {
 	rawJSON := inputRawJSON
 	// Base OpenAI chat completions template with default values
 	out := `{"model":"","messages":[],"stream":false}`
@@ -227,11 +252,17 @@ func ConvertOpenAIResponsesRequestToOpenAIChatCompletions(modelName string, inpu
 		}
 	}
 
+	// Handle reasoning effort: request value takes priority, then config default
+	var effort string
 	if reasoningEffort := root.Get("reasoning.effort"); reasoningEffort.Exists() {
-		effort := strings.ToLower(strings.TrimSpace(reasoningEffort.String()))
-		if effort != "" {
-			out, _ = sjson.Set(out, "reasoning_effort", effort)
-		}
+		effort = strings.ToLower(strings.TrimSpace(reasoningEffort.String()))
+	}
+	// If no effort in request, use default from config
+	if effort == "" && defaultReasoningEffort != "" {
+		effort = strings.ToLower(strings.TrimSpace(defaultReasoningEffort))
+	}
+	if effort != "" {
+		out, _ = sjson.Set(out, "reasoning_effort", effort)
 	}
 
 	// Convert tool_choice if present

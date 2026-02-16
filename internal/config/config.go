@@ -470,10 +470,31 @@ type OpenAICompatibilityModel struct {
 
 	// Alias is the model name alias that clients will use to reference this model.
 	Alias string `yaml:"alias" json:"alias"`
+
+	// DefaultReasoningEffort is the default reasoning effort to use when the request
+	// doesn't include reasoning.effort. Valid values: "low", "medium", "high".
+	DefaultReasoningEffort string `yaml:"default_reasoning_effort,omitempty" json:"default_reasoning_effort,omitempty"`
 }
 
 func (m OpenAICompatibilityModel) GetName() string  { return m.Name }
 func (m OpenAICompatibilityModel) GetAlias() string { return m.Alias }
+
+// GetDefaultReasoningEffort returns the default reasoning effort for the given model name.
+// It searches through all OpenAI compatibility configurations and returns the first match
+// found for either the alias or the actual model name. Returns an empty string if not found.
+func (c *Config) GetDefaultReasoningEffort(modelName string) string {
+	if c == nil {
+		return ""
+	}
+	for _, compat := range c.OpenAICompatibility {
+		for _, model := range compat.Models {
+			if model.Alias == modelName || model.Name == modelName {
+				return strings.ToLower(strings.TrimSpace(model.DefaultReasoningEffort))
+			}
+		}
+	}
+	return ""
+}
 
 // LoadConfig reads a YAML configuration file from the given path,
 // unmarshals it into a Config struct, applies environment variable overrides,

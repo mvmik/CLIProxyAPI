@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	. "github.com/router-for-me/CLIProxyAPI/v6/internal/constant"
@@ -80,6 +81,16 @@ func (h *OpenAIResponsesAPIHandler) Responses(c *gin.Context) {
 			},
 		})
 		return
+	}
+
+	// Apply default reasoning effort if not present in request
+	modelName := gjson.GetBytes(rawJSON, "model").String()
+	reasoningEffort := gjson.GetBytes(rawJSON, "reasoning.effort")
+	if !reasoningEffort.Exists() || strings.TrimSpace(reasoningEffort.String()) == "" {
+		defaultEffort := h.FullCfg.GetDefaultReasoningEffort(modelName)
+		if defaultEffort != "" {
+			rawJSON, _ = sjson.SetBytes(rawJSON, "reasoning.effort", defaultEffort)
+		}
 	}
 
 	// Check if the client requested a streaming response.

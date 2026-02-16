@@ -14,13 +14,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/thinking"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/executor"
-	"github.com/router-for-me/CLIProxyAPI/v6/sdk/config"
+	sdkconfig "github.com/router-for-me/CLIProxyAPI/v6/sdk/config"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v6/sdk/translator"
 	"golang.org/x/net/context"
 )
@@ -104,7 +105,7 @@ func BuildErrorResponseBody(status int, errText string) []byte {
 
 // StreamingKeepAliveInterval returns the SSE keep-alive interval for this server.
 // Returning 0 disables keep-alives (default when unset).
-func StreamingKeepAliveInterval(cfg *config.SDKConfig) time.Duration {
+func StreamingKeepAliveInterval(cfg *sdkconfig.SDKConfig) time.Duration {
 	seconds := defaultStreamingKeepAliveSeconds
 	if cfg != nil {
 		seconds = cfg.Streaming.KeepAliveSeconds
@@ -117,7 +118,7 @@ func StreamingKeepAliveInterval(cfg *config.SDKConfig) time.Duration {
 
 // NonStreamingKeepAliveInterval returns the keep-alive interval for non-streaming responses.
 // Returning 0 disables keep-alives (default when unset).
-func NonStreamingKeepAliveInterval(cfg *config.SDKConfig) time.Duration {
+func NonStreamingKeepAliveInterval(cfg *sdkconfig.SDKConfig) time.Duration {
 	seconds := 0
 	if cfg != nil {
 		seconds = cfg.NonStreamKeepAliveInterval
@@ -129,7 +130,7 @@ func NonStreamingKeepAliveInterval(cfg *config.SDKConfig) time.Duration {
 }
 
 // StreamingBootstrapRetries returns how many times a streaming request may be retried before any bytes are sent.
-func StreamingBootstrapRetries(cfg *config.SDKConfig) int {
+func StreamingBootstrapRetries(cfg *sdkconfig.SDKConfig) int {
 	retries := defaultStreamingBootstrapRetries
 	if cfg != nil {
 		retries = cfg.Streaming.BootstrapRetries
@@ -163,21 +164,26 @@ type BaseAPIHandler struct {
 	AuthManager *coreauth.Manager
 
 	// Cfg holds the current application configuration.
-	Cfg *config.SDKConfig
+	Cfg *sdkconfig.SDKConfig
+
+	// FullCfg holds the full configuration including OpenAI compatibility settings.
+	FullCfg *config.Config
 }
 
 // NewBaseAPIHandlers creates a new API handlers instance.
 // It takes a slice of clients and configuration as input.
 //
 // Parameters:
-//   - cliClients: A slice of AI service clients
-//   - cfg: The application configuration
+//   - cfg: The SDK configuration
+//   - fullCfg: The full configuration including OpenAI compatibility settings (may be nil for tests)
+//   - authManager: The auth manager
 //
 // Returns:
 //   - *BaseAPIHandler: A new API handlers instance
-func NewBaseAPIHandlers(cfg *config.SDKConfig, authManager *coreauth.Manager) *BaseAPIHandler {
+func NewBaseAPIHandlers(cfg *sdkconfig.SDKConfig, fullCfg *config.Config, authManager *coreauth.Manager) *BaseAPIHandler {
 	return &BaseAPIHandler{
 		Cfg:         cfg,
+		FullCfg:     fullCfg,
 		AuthManager: authManager,
 	}
 }
@@ -188,7 +194,7 @@ func NewBaseAPIHandlers(cfg *config.SDKConfig, authManager *coreauth.Manager) *B
 // Parameters:
 //   - clients: The new slice of AI service clients
 //   - cfg: The new application configuration
-func (h *BaseAPIHandler) UpdateClients(cfg *config.SDKConfig) { h.Cfg = cfg }
+func (h *BaseAPIHandler) UpdateClients(cfg *sdkconfig.SDKConfig) { h.Cfg = cfg }
 
 // GetAlt extracts the 'alt' parameter from the request query string.
 // It checks both 'alt' and '$alt' parameters and returns the appropriate value.

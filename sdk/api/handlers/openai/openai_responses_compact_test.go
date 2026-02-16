@@ -62,7 +62,7 @@ func TestOpenAIResponsesCompactRejectsStream(t *testing.T) {
 		registry.GetGlobalRegistry().UnregisterClient(auth.ID)
 	})
 
-	base := handlers.NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, manager)
+	base := handlers.NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, nil, manager)
 	h := NewOpenAIResponsesAPIHandler(base)
 	router := gin.New()
 	router.POST("/v1/responses/compact", h.Compact)
@@ -95,7 +95,7 @@ func TestOpenAIResponsesCompactExecute(t *testing.T) {
 		registry.GetGlobalRegistry().UnregisterClient(auth.ID)
 	})
 
-	base := handlers.NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, manager)
+	base := handlers.NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, nil, manager)
 	h := NewOpenAIResponsesAPIHandler(base)
 	router := gin.New()
 	router.POST("/v1/responses/compact", h.Compact)

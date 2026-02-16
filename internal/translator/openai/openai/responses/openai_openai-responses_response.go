@@ -3,6 +3,7 @@ package responses
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -182,6 +183,8 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 		outputItemDone, _ = sjson.Set(outputItemDone, "item.id", st.ReasoningID)
 		outputItemDone, _ = sjson.Set(outputItemDone, "output_index", st.ReasoningIndex)
 		outputItemDone, _ = sjson.Set(outputItemDone, "item.summary.text", text)
+		// Encode reasoning text as encrypted_content
+		outputItemDone, _ = sjson.Set(outputItemDone, "item.encrypted_content", base64.StdEncoding.EncodeToString([]byte(text)))
 		out = append(out, emitRespEvent("response.output_item.done", outputItemDone))
 
 		st.Reasonings = append(st.Reasonings, oaiToResponsesStateReasoning{ReasoningID: st.ReasoningID, ReasoningData: text})
@@ -517,9 +520,11 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 				outputsWrapper := `{"arr":[]}`
 				if len(st.Reasonings) > 0 {
 					for _, r := range st.Reasonings {
-						item := `{"id":"","type":"reasoning","summary":[{"type":"summary_text","text":""}]}`
+						item := `{"id":"","type":"reasoning","encrypted_content":"","summary":[{"type":"summary_text","text":""}]}`
 						item, _ = sjson.Set(item, "id", r.ReasoningID)
 						item, _ = sjson.Set(item, "summary.0.text", r.ReasoningData)
+						// Encode reasoning text as encrypted_content
+						item, _ = sjson.Set(item, "encrypted_content", base64.StdEncoding.EncodeToString([]byte(r.ReasoningData)))
 						outputsWrapper, _ = sjson.SetRaw(outputsWrapper, "arr.-1", item)
 					}
 				}
@@ -717,6 +722,8 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStream(_ context.Co
 		if rcText != "" {
 			reasoningItem, _ = sjson.Set(reasoningItem, "summary.0.type", "summary_text")
 			reasoningItem, _ = sjson.Set(reasoningItem, "summary.0.text", rcText)
+			// Encode reasoning text as encrypted_content
+			reasoningItem, _ = sjson.Set(reasoningItem, "encrypted_content", base64.StdEncoding.EncodeToString([]byte(rcText)))
 		}
 		outputsWrapper, _ = sjson.SetRaw(outputsWrapper, "arr.-1", reasoningItem)
 	}

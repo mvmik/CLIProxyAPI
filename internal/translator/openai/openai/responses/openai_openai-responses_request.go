@@ -1,6 +1,7 @@
 package responses
 
 import (
+	"encoding/base64"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -56,6 +57,9 @@ func ConvertOpenAIResponsesRequestToOpenAIChatCompletions(modelName string, inpu
 	}
 
 	// Convert input array to messages
+	// Track pending reasoning content to attach to the next assistant message
+	var pendingReasoningContent string
+
 	if input := root.Get("input"); input.Exists() && input.IsArray() {
 		input.ForEach(func(_, item gjson.Result) bool {
 			itemType := item.Get("type").String()
@@ -64,6 +68,18 @@ func ConvertOpenAIResponsesRequestToOpenAIChatCompletions(modelName string, inpu
 			}
 
 			switch itemType {
+			case "reasoning":
+				// Handle reasoning input items with encrypted_content
+				// Base64 decode and defer until we encounter the next assistant message
+				if enc := item.Get("encrypted_content"); enc.Exists() && enc.String() != "" {
+					decoded, err := base64.StdEncoding.DecodeString(enc.String())
+					if err == nil {
+						// Accumulate pending reasoning content (concatenate if multiple)
+						pendingReasoningContent += string(decoded)
+					}
+					// If base64 decode fails, silently skip (invalid data)
+				}
+
 			case "message", "":
 				// Handle regular message conversion
 				role := item.Get("role").String()
@@ -109,6 +125,12 @@ func ConvertOpenAIResponsesRequestToOpenAIChatCompletions(modelName string, inpu
 					message, _ = sjson.Set(message, "content", content.String())
 				}
 
+				// Attach pending reasoning_content to assistant messages
+				if role == "assistant" && pendingReasoningContent != "" {
+					message, _ = sjson.Set(message, "reasoning_content", pendingReasoningContent)
+					pendingReasoningContent = "" // Clear after attaching
+				}
+
 				out, _ = sjson.SetRaw(out, "messages.-1", message)
 
 			case "function_call":
@@ -130,6 +152,13 @@ func ConvertOpenAIResponsesRequestToOpenAIChatCompletions(modelName string, inpu
 				}
 
 				assistantMessage, _ = sjson.SetRaw(assistantMessage, "tool_calls.0", toolCall)
+
+				// Attach pending reasoning_content to assistant messages with function calls
+				if pendingReasoningContent != "" {
+					assistantMessage, _ = sjson.Set(assistantMessage, "reasoning_content", pendingReasoningContent)
+					pendingReasoningContent = "" // Clear after attaching
+				}
+
 				out, _ = sjson.SetRaw(out, "messages.-1", assistantMessage)
 
 			case "function_call_output":

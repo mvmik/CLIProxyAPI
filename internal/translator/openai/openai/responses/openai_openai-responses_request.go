@@ -81,9 +81,62 @@ func ConvertOpenAIResponsesRequestToOpenAIChatCompletionsWithDefault(modelName s
 		out, _ = sjson.SetRaw(out, "messages.-1", systemMessage)
 	}
 
-	// Convert input array to messages
-	// Track pending reasoning content to attach to the next assistant message
+	// Convert input array to messages.
+	// Keep assistant message/tool-calls merged in a single turn.
 	var pendingReasoningContent string
+	var pendingAssistantMessage string
+
+	flushPendingAssistant := func() {
+		if pendingAssistantMessage == "" {
+			return
+		}
+		out, _ = sjson.SetRaw(out, "messages.-1", pendingAssistantMessage)
+		pendingAssistantMessage = ""
+	}
+
+	attachPendingReasoningToAssistant := func() {
+		if pendingReasoningContent == "" || pendingAssistantMessage == "" {
+			return
+		}
+		if existing := gjson.Get(pendingAssistantMessage, "reasoning_content").String(); existing != "" {
+			pendingAssistantMessage, _ = sjson.Set(pendingAssistantMessage, "reasoning_content", existing+pendingReasoningContent)
+		} else {
+			pendingAssistantMessage, _ = sjson.Set(pendingAssistantMessage, "reasoning_content", pendingReasoningContent)
+		}
+		pendingReasoningContent = ""
+	}
+
+	buildMessage := func(item gjson.Result, role string) string {
+		message := `{"role":"","content":[]}`
+		message, _ = sjson.Set(message, "role", role)
+
+		if content := item.Get("content"); content.Exists() && content.IsArray() {
+			content.ForEach(func(_, contentItem gjson.Result) bool {
+				contentType := contentItem.Get("type").String()
+				if contentType == "" {
+					contentType = "input_text"
+				}
+
+				switch contentType {
+				case "input_text", "output_text":
+					text := contentItem.Get("text").String()
+					contentPart := `{"type":"text","text":""}`
+					contentPart, _ = sjson.Set(contentPart, "text", text)
+					message, _ = sjson.SetRaw(message, "content.-1", contentPart)
+				case "input_image":
+					imageURL := contentItem.Get("image_url").String()
+					contentPart := `{"type":"image_url","image_url":{"url":""}}`
+					contentPart, _ = sjson.Set(contentPart, "image_url.url", imageURL)
+					message, _ = sjson.SetRaw(message, "content.-1", contentPart)
+				}
+				return true
+			})
+		} else if content.Type == gjson.String {
+			message, _ = sjson.Set(message, "content", content.String())
+		}
+
+		return message
+	}
 
 	if input := root.Get("input"); input.Exists() && input.IsArray() {
 		input.ForEach(func(_, item gjson.Result) bool {
@@ -106,62 +159,29 @@ func ConvertOpenAIResponsesRequestToOpenAIChatCompletionsWithDefault(modelName s
 				}
 
 			case "message", "":
-				// Handle regular message conversion
+				// Handle regular message conversion.
 				role := item.Get("role").String()
 				if role == "developer" {
 					role = "user"
 				}
-				message := `{"role":"","content":[]}`
-				message, _ = sjson.Set(message, "role", role)
-
-				if content := item.Get("content"); content.Exists() && content.IsArray() {
-					var messageContent string
-					var toolCalls []interface{}
-
-					content.ForEach(func(_, contentItem gjson.Result) bool {
-						contentType := contentItem.Get("type").String()
-						if contentType == "" {
-							contentType = "input_text"
-						}
-
-						switch contentType {
-						case "input_text", "output_text":
-							text := contentItem.Get("text").String()
-							contentPart := `{"type":"text","text":""}`
-							contentPart, _ = sjson.Set(contentPart, "text", text)
-							message, _ = sjson.SetRaw(message, "content.-1", contentPart)
-						case "input_image":
-							imageURL := contentItem.Get("image_url").String()
-							contentPart := `{"type":"image_url","image_url":{"url":""}}`
-							contentPart, _ = sjson.Set(contentPart, "image_url.url", imageURL)
-							message, _ = sjson.SetRaw(message, "content.-1", contentPart)
-						}
-						return true
-					})
-
-					if messageContent != "" {
-						message, _ = sjson.Set(message, "content", messageContent)
-					}
-
-					if len(toolCalls) > 0 {
-						message, _ = sjson.Set(message, "tool_calls", toolCalls)
-					}
-				} else if content.Type == gjson.String {
-					message, _ = sjson.Set(message, "content", content.String())
+				message := buildMessage(item, role)
+				if role == "assistant" {
+					// Hold assistant message to merge with following function_call items.
+					flushPendingAssistant()
+					pendingAssistantMessage = message
+					attachPendingReasoningToAssistant()
+				} else {
+					flushPendingAssistant()
+					out, _ = sjson.SetRaw(out, "messages.-1", message)
 				}
-
-				// Attach pending reasoning_content to assistant messages
-				if role == "assistant" && pendingReasoningContent != "" {
-					message, _ = sjson.Set(message, "reasoning_content", pendingReasoningContent)
-					pendingReasoningContent = "" // Clear after attaching
-				}
-
-				out, _ = sjson.SetRaw(out, "messages.-1", message)
 
 			case "function_call":
-				// Handle function call conversion to assistant message with tool_calls
-				assistantMessage := `{"role":"assistant","tool_calls":[]}`
-
+				// Handle function call conversion to assistant message with tool_calls.
+				// Merge into pending assistant turn if one exists.
+				if pendingAssistantMessage == "" {
+					pendingAssistantMessage = `{"role":"assistant","tool_calls":[]}`
+				}
+				attachPendingReasoningToAssistant()
 				toolCall := `{"id":"","type":"function","function":{"name":"","arguments":""}}`
 
 				if callId := item.Get("call_id"); callId.Exists() {
@@ -176,18 +196,11 @@ func ConvertOpenAIResponsesRequestToOpenAIChatCompletionsWithDefault(modelName s
 					toolCall, _ = sjson.Set(toolCall, "function.arguments", arguments.String())
 				}
 
-				assistantMessage, _ = sjson.SetRaw(assistantMessage, "tool_calls.0", toolCall)
-
-				// Attach pending reasoning_content to assistant messages with function calls
-				if pendingReasoningContent != "" {
-					assistantMessage, _ = sjson.Set(assistantMessage, "reasoning_content", pendingReasoningContent)
-					pendingReasoningContent = "" // Clear after attaching
-				}
-
-				out, _ = sjson.SetRaw(out, "messages.-1", assistantMessage)
+				pendingAssistantMessage, _ = sjson.SetRaw(pendingAssistantMessage, "tool_calls.-1", toolCall)
 
 			case "function_call_output":
-				// Handle function call output conversion to tool message
+				// Handle function call output conversion to tool message.
+				flushPendingAssistant()
 				toolMessage := `{"role":"tool","tool_call_id":"","content":""}`
 
 				if callId := item.Get("call_id"); callId.Exists() {
@@ -203,6 +216,7 @@ func ConvertOpenAIResponsesRequestToOpenAIChatCompletionsWithDefault(modelName s
 
 			return true
 		})
+		flushPendingAssistant()
 	} else if input.Type == gjson.String {
 		msg := "{}"
 		msg, _ = sjson.Set(msg, "role", "user")

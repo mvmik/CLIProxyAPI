@@ -108,7 +108,7 @@ func TestRequest_InvalidBase64(t *testing.T) {
 	outputStr := string(output)
 
 	// Invalid base64 should be silently skipped
-	assistantReasoning := gjson.Get(outputStr, "messages.2.reasoning_content")
+	assistantReasoning := gjson.Get(outputStr, "messages.1.reasoning_content")
 	if assistantReasoning.Exists() && assistantReasoning.String() != "" {
 		t.Errorf("expected no reasoning_content for invalid base64, got %q", assistantReasoning.String())
 	}
@@ -145,6 +145,87 @@ func TestRequest_ReasoningWithFunctionCall(t *testing.T) {
 	toolCallName := gjson.Get(outputStr, "messages.1.tool_calls.0.function.name")
 	if toolCallName.String() != "get_weather" {
 		t.Errorf("expected function name 'get_weather', got %q", toolCallName.String())
+	}
+}
+
+// TestRequest_AssistantMessageAndFunctionCallMerged ensures assistant content + tool_call are unified in one message.
+func TestRequest_AssistantMessageAndFunctionCallMerged(t *testing.T) {
+	reasoningText := "Need a tool call."
+	encryptedContent := base64.StdEncoding.EncodeToString([]byte(reasoningText))
+
+	inputJSON := []byte(`{
+		"model": "gpt-5",
+		"input": [
+			{"type": "message", "role": "user", "content": "weather?"},
+			{"type": "reasoning", "encrypted_content": "` + encryptedContent + `"},
+			{"type": "message", "role": "assistant", "content": [{"type":"output_text","text":"Let me check."}]},
+			{"type": "function_call", "call_id": "call_999", "name": "get_weather", "arguments": "{\"location\":\"NYC\"}"}
+		]
+	}`)
+
+	output := ConvertOpenAIResponsesRequestToOpenAIChatCompletions("gpt-5", inputJSON, false)
+	outputStr := string(output)
+
+	if got := gjson.Get(outputStr, "messages.#").Int(); got != 2 {
+		t.Fatalf("expected exactly 2 messages (user + merged assistant), got %d", got)
+	}
+
+	if got := gjson.Get(outputStr, "messages.1.role").String(); got != "assistant" {
+		t.Fatalf("expected assistant at messages.1, got %q", got)
+	}
+
+	if got := gjson.Get(outputStr, "messages.1.reasoning_content").String(); got != reasoningText {
+		t.Fatalf("expected reasoning_content %q, got %q", reasoningText, got)
+	}
+
+	if got := gjson.Get(outputStr, "messages.1.content.0.text").String(); got != "Let me check." {
+		t.Fatalf("expected assistant content 'Let me check.', got %q", got)
+	}
+
+	if got := gjson.Get(outputStr, "messages.1.tool_calls.0.function.name").String(); got != "get_weather" {
+		t.Fatalf("expected merged tool call name 'get_weather', got %q", got)
+	}
+}
+
+// TestRequest_PendingAssistantFlushedBeforeToolOutput ensures tool output follows merged assistant tool_calls.
+func TestRequest_PendingAssistantFlushedBeforeToolOutput(t *testing.T) {
+	reasoningText := "Call tool now."
+	encryptedContent := base64.StdEncoding.EncodeToString([]byte(reasoningText))
+
+	inputJSON := []byte(`{
+		"model": "gpt-5",
+		"input": [
+			{"type":"message","role":"user","content":"start"},
+			{"type":"reasoning","encrypted_content":"` + encryptedContent + `"},
+			{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Calling tool"}]},
+			{"type":"function_call","call_id":"call_1","name":"do_work","arguments":"{}"},
+			{"type":"function_call_output","call_id":"call_1","output":"done"},
+			{"type":"message","role":"user","content":"next"}
+		]
+	}`)
+
+	output := ConvertOpenAIResponsesRequestToOpenAIChatCompletions("gpt-5", inputJSON, false)
+	outputStr := string(output)
+
+	if got := gjson.Get(outputStr, "messages.#").Int(); got != 4 {
+		t.Fatalf("expected 4 messages (user, assistant, tool, user), got %d", got)
+	}
+
+	if got := gjson.Get(outputStr, "messages.1.role").String(); got != "assistant" {
+		t.Fatalf("expected assistant at messages.1, got %q", got)
+	}
+	if got := gjson.Get(outputStr, "messages.1.reasoning_content").String(); got != reasoningText {
+		t.Fatalf("expected reasoning_content %q, got %q", reasoningText, got)
+	}
+	if got := gjson.Get(outputStr, "messages.1.tool_calls.0.id").String(); got != "call_1" {
+		t.Fatalf("expected tool_call id 'call_1', got %q", got)
+	}
+
+	if got := gjson.Get(outputStr, "messages.2.role").String(); got != "tool" {
+		t.Fatalf("expected tool message at messages.2, got %q", got)
+	}
+	if got := gjson.Get(outputStr, "messages.2.tool_call_id").String(); got != "call_1" {
+		t.Fatalf("expected tool_call_id 'call_1', got %q", got)
 	}
 }
 

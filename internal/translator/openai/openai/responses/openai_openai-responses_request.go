@@ -100,8 +100,10 @@ func ConvertOpenAIResponsesRequestToOpenAIChatCompletionsWithDefault(modelName s
 		}
 		if existing := gjson.Get(pendingAssistantMessage, "reasoning_content").String(); existing != "" {
 			pendingAssistantMessage, _ = sjson.Set(pendingAssistantMessage, "reasoning_content", existing+pendingReasoningContent)
+			pendingAssistantMessage, _ = sjson.Set(pendingAssistantMessage, "reasoning", existing+pendingReasoningContent)
 		} else {
 			pendingAssistantMessage, _ = sjson.Set(pendingAssistantMessage, "reasoning_content", pendingReasoningContent)
+			pendingAssistantMessage, _ = sjson.Set(pendingAssistantMessage, "reasoning", pendingReasoningContent)
 		}
 		pendingReasoningContent = ""
 	}

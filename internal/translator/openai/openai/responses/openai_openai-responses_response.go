@@ -235,8 +235,12 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 					st.MsgTextBuf[idx].WriteString(c.String())
 				}
 
-				// reasoning_content (OpenAI reasoning incremental text)
-				if rc := delta.Get("reasoning_content"); rc.Exists() && rc.String() != "" {
+				// reasoning / reasoning_content (OpenAI reasoning incremental text)
+				rc := delta.Get("reasoning")
+				if !rc.Exists() || rc.String() == "" {
+					rc = delta.Get("reasoning_content")
+				}
+				if rc.Exists() && rc.String() != "" {
 					// On first appearance, add reasoning item and part
 					if st.ReasoningID == "" {
 						st.ReasoningID = fmt.Sprintf("rs_%s_%d", st.ResponseID, idx)
@@ -705,8 +709,11 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStream(_ context.Co
 
 	// Build output list from choices[...]
 	outputsWrapper := `{"arr":[]}`
-	// Detect and capture reasoning content if present
-	rcText := gjson.GetBytes(rawJSON, "choices.0.message.reasoning_content").String()
+	// Detect and capture reasoning content if present (prefer reasoning over reasoning_content)
+	rcText := gjson.GetBytes(rawJSON, "choices.0.message.reasoning").String()
+	if rcText == "" {
+		rcText = gjson.GetBytes(rawJSON, "choices.0.message.reasoning_content").String()
+	}
 	includeReasoning := rcText != ""
 	if !includeReasoning && len(requestRawJSON) > 0 {
 		includeReasoning = gjson.GetBytes(requestRawJSON, "reasoning").Exists()

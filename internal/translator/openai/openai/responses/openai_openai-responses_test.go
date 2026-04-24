@@ -514,3 +514,139 @@ func TestResponse_NonStreaming_NoReasoning(t *testing.T) {
 		}
 	}
 }
+
+// TestRequest_BothReasoningFields tests that responses->chat/completions emits both reasoning_content and reasoning
+func TestRequest_BothReasoningFields(t *testing.T) {
+	reasoningText := "Dual field test..."
+	encryptedContent := base64.StdEncoding.EncodeToString([]byte(reasoningText))
+
+	inputJSON := []byte(`{
+			"model": "gpt-5",
+			"input": [
+				{"type": "message", "role": "user", "content": "Hello"},
+				{"type": "reasoning", "encrypted_content": "` + encryptedContent + `"},
+				{"type": "message", "role": "assistant", "content": "Hi!"}
+			]
+		}`)
+
+	output := ConvertOpenAIResponsesRequestToOpenAIChatCompletions("gpt-5", inputJSON, false)
+	outputStr := string(output)
+
+	rc := gjson.Get(outputStr, "messages.1.reasoning_content").String()
+	r := gjson.Get(outputStr, "messages.1.reasoning").String()
+
+	if rc != reasoningText {
+		t.Errorf("expected reasoning_content %q, got %q", reasoningText, rc)
+	}
+	if r != reasoningText {
+		t.Errorf("expected reasoning %q, got %q", reasoningText, r)
+	}
+}
+
+// TestResponse_Streaming_ReasoningField tests that streaming prefers reasoning over reasoning_content
+func TestResponse_Streaming_ReasoningField(t *testing.T) {
+	reasoningText := "Using the new field..."
+
+	in := []string{
+		`data: {"id":"test-rs","object":"chat.completion.chunk","created":1234567890,"choices":[{"index":0,"delta":{"reasoning":"Using the new field..."},"finish_reason":null}]}`,
+		`data: {"id":"test-rs","object":"chat.completion.chunk","created":1234567890,"choices":[{"index":0,"delta":{"content":"Answer"},"finish_reason":null}]}`,
+		`data: {"id":"test-rs","object":"chat.completion.chunk","created":1234567890,"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+	}
+
+	var param any
+	var out []string
+	for _, line := range in {
+		out = append(out, ConvertOpenAIChatCompletionsResponseToOpenAIResponses(context.Background(), "gpt-5", nil, nil, []byte(line), &param)...)
+	}
+
+	var gotEncryptedContent string
+	for _, chunk := range out {
+		ev, data := parseSSEEvent(t, chunk)
+		if ev == "response.output_item.done" && data.Get("item.type").String() == "reasoning" {
+			gotEncryptedContent = data.Get("item.encrypted_content").String()
+		}
+	}
+
+	if gotEncryptedContent == "" {
+		t.Fatalf("expected encrypted_content from reasoning field")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(gotEncryptedContent)
+	if err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if string(decoded) != reasoningText {
+		t.Errorf("expected %q, got %q", reasoningText, string(decoded))
+	}
+}
+
+// TestResponse_NonStreaming_ReasoningField tests non-streaming prefers reasoning over reasoning_content
+func TestResponse_NonStreaming_ReasoningField(t *testing.T) {
+	reasoningText := "New reasoning field value"
+
+	inputJSON := []byte(`{
+			"id": "test-nf",
+			"object": "chat.completion",
+			"created": 1234567890,
+			"model": "gpt-5",
+			"choices": [{
+				"index": 0,
+				"message": {
+					"role": "assistant",
+					"reasoning": "` + reasoningText + `",
+					"content": "The answer."
+				},
+				"finish_reason": "stop"
+			}]
+		}`)
+
+	output := ConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStream(context.Background(), "gpt-5", nil, nil, inputJSON, nil)
+	outputStr := string(output)
+
+	encryptedContent := gjson.Get(outputStr, "output.0.encrypted_content").String()
+	if encryptedContent == "" {
+		t.Fatalf("expected encrypted_content")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(encryptedContent)
+	if err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if string(decoded) != reasoningText {
+		t.Errorf("expected %q, got %q", reasoningText, string(decoded))
+	}
+}
+
+// TestResponse_NonStreaming_ReasoningFieldFallsBack tests fallback to reasoning_content when reasoning is absent
+func TestResponse_NonStreaming_ReasoningFieldFallsBack(t *testing.T) {
+	reasoningText := "Fallback value"
+
+	inputJSON := []byte(`{
+			"id": "test-fb",
+			"object": "chat.completion",
+			"created": 1234567890,
+			"model": "gpt-5",
+			"choices": [{
+				"index": 0,
+				"message": {
+					"role": "assistant",
+					"reasoning_content": "` + reasoningText + `",
+					"content": "The answer."
+				},
+				"finish_reason": "stop"
+			}]
+		}`)
+
+	output := ConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStream(context.Background(), "gpt-5", nil, nil, inputJSON, nil)
+	outputStr := string(output)
+
+	encryptedContent := gjson.Get(outputStr, "output.0.encrypted_content").String()
+	if encryptedContent == "" {
+		t.Fatalf("expected encrypted_content")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(encryptedContent)
+	if err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if string(decoded) != reasoningText {
+		t.Errorf("expected %q, got %q", reasoningText, string(decoded))
+	}
+}
